@@ -1,0 +1,89 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seafile
+  namespace: NAMESPACE
+spec:
+  selector:
+    matchLabels:
+      app: seafile
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: seafile
+    spec:
+      hostAliases:
+        - ip: "127.0.0.1"
+      containers:
+        - image: mariadb:latest
+          name: seafile-mysql
+          env:
+            - name: MARIADB_ROOT_PASSWORD
+              value: "SECRETPW"
+          volumeMounts:
+            - name: seafile-data
+              mountPath: /var/lib/mysql/
+              subPath: seafile-db
+        - image: memcached:1.6.18
+          name: seafile-memcached
+          command: ["memcached"]
+          args: ["-m 256"]
+        - image: seafileltd/seafile-mc:latest
+          name: seafile
+          env:
+            - name: DB_HOST
+              value: "127.0.0.1"
+            - name: DB_ROOT_PASSWD
+              value: "SECRETPW"
+            - name: SEAFILE_ADMIN_EMAIL
+              value: "admin@example.com"
+            - name: SEAFILE_ADMIN_PASSWORD
+              value: "SECRETPW"
+            - name: SEAFILE_SERVER_LETSENCRYPT
+              value: "false"
+            - name: SEAFILE_SERVER_HOSTNAME
+              value: "yourdomain.com"
+          volumeMounts:
+            - name: seafile-data
+              mountPath: /shared/
+              subPath: seafile-data
+      volumes:
+        - name: seafile-data
+          persistentVolumeClaim:
+            claimName: seafile-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seafile
+  namespace: NAMESPACE
+spec:
+  type: ClusterIP
+  ports:
+  - name: seafile
+    port: 80
+    targetPort: 80
+  selector:
+    app: seafile
+
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: seafile
+  namespace: NAMESPACE
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`yourdomain.com`)
+      kind: Rule
+      services:
+        - name: seafile
+          port: 80
+  tls:
+    certResolver: letsencrypt
